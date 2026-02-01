@@ -1,0 +1,5 @@
+{
+  "name": "Lighthouse SF — City Intelligence",
+  "description": "A 9-agent multi-source urban analytics system for San Francisco using Gemini models to synthesize Public Safety, Infrastructure, and Zoning data.",
+  "requestFramePermissions": []
+}
