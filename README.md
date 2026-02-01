@@ -1,100 +1,55 @@
-# Lighthouse SF — City Intelligence Platform
+# Lighthouse SF
+### The Operating System for Autonomous City Intelligence
 
-> **A 9-Agent Autonomous Urban Analytics System powered by Google Gemini 2.5 & Veo 3.1**
-
-![Status](https://img.shields.io/badge/System-Online-emerald) ![Agents](https://img.shields.io/badge/Agents-9_Active-blue) ![AI](https://img.shields.io/badge/Model-Gemini_2.5_Pro-purple)
-
-## 📖 Executive Summary
-
-**Lighthouse SF** is a next-generation urban intelligence platform designed to predict city dynamics before they become crises. Unlike traditional dashboards that display static historical data, Lighthouse utilizes a mesh of **9 autonomous AI agents** to actively fetch, cross-reference, and debate data from Public Safety, Infrastructure, and Land Use sources.
-
-The system features **Marathon Orchestrator**, a logic loop that ensures no signal is lost by tracking issues over time, and a **Video Agent** that converts complex data reports into cinematic executive briefs using **Veo 3.1**.
+![Status](https://img.shields.io/badge/System-Online-emerald?style=for-the-badge) ![Agents](https://img.shields.io/badge/Agents-9_Active-blue?style=for-the-badge) ![AI](https://img.shields.io/badge/Model-Gemini_2.5_Pro-purple?style=for-the-badge) ![Video](https://img.shields.io/badge/Video-Veo_3.1-pink?style=for-the-badge)
 
 ---
 
-## 🏗 System Architecture
+## 1. The Problem: Data Rich, Insight Poor
+San Francisco generates terabytes of data daily—from 311 calls and police incidents to building permits and legislative agendas. Yet, the city operates reactively. 
 
-The platform operates on a **3x3 Agent Grid**, covering three critical domains with three distinct intelligence sources per domain.
+*   **Siloed Intelligence**: Police data doesn't talk to Zoning data. Construction permits aren't cross-referenced with fire response times.
+*   **Latency**: By the time a dashboard is updated, the crisis has already happened.
+*   **Signal Decay**: Critical warnings are buried in PDF attachments and CSV rows, lost in the noise.
 
+We don't need another dashboard. We need a nervous system.
+
+## 2. The Solution: Lighthouse SF
+Lighthouse is an **autonomous computational core** that fundamentally changes how urban data is synthesized. It replaces passive visualization with active, agentic reasoning.
+
+Instead of waiting for a human to query the database, Lighthouse deploys a mesh of **9 specialized AI Agents** that actively patrol the digital city 24/7.
+
+### The 3x3 Intelligence Matrix
 | Domain | 📊 Data Agent (SODA) | 📰 News Agent (Scraper) | 🏛 Gov Agent (Legistar) |
 | :--- | :--- | :--- | :--- |
-| **Public Safety (PS)** | Police Incidents, Fire Calls | NBC Bay Area, SF Chronicle | Safety Committee Agendas |
-| **Infrastructure (IU)** | 311 Cases, Potholes | SFPUC Alerts, Transit News | Budget & Finance Files |
-| **Land Use (LZ)** | Building Permits, Housing | Development News | Land Use Committee |
+| **Public Safety** | Real-time APIs (Crime, Fire) | Local Media (NBC, SF Chron) | Safety Committee Agendas |
+| **Infrastructure** | 311 Requests, Dig Permits | Utility Alerts (SFPUC) | Budget & Finance Files |
+| **Land Use** | Building Permits, Housing | Development News | Land Use Committee |
 
-### The 9-Stage Pipeline
+## 3. How It Works: The Autonomous Pipeline
 
-1.  **Parallel Fetch**: All 9 agents simultaneously query SF Open Data (SODA), external news APIs, and government legislative portals.
-2.  **Analysis**: Each agent uses **Gemini 2.5 Flash** to extract trends and anomalies from raw payloads.
-3.  **Consolidation**: Three "Area Consolidators" (AI Nodes) merge findings for their specific domain (e.g., PS Consolidator merges Crime Data + Safety News).
-4.  **Cross-Area Roundtable**: A rigorous debate phase where domains cross-check for conflicts (e.g., *Does this road closure block fire trucks?*).
-5.  **Issue Card Generation**: The **Master Orchestrator** synthesizes the debate into actionable "Issue Cards" with severity scores and 10-year forecasts.
-6.  **Visualization**: A Chart Agent dynamically generates React Recharts configurations based on the data.
-7.  **Marathon Loop**: The system checks past issues against fresh data, auto-escalating worsening trends.
-8.  **Video Synthesis**: The **Video Agent** creates a 30s photorealistic video brief using **Veo 3.1** and **Imagen** to communicate priority issues to stakeholders.
+Lighthouse doesn't just "fetch data." It runs a sophisticated, reliable cognitive pipeline:
 
----
+1.  **Parallel Fetch**: All 9 agents concurrently ingest data from 3 diverse sources (API, semantic web, document store).
+2.  **Cross-Area Roundtable**: Agents don't work in isolation. A dedicated **Gemini 2.5 Pro Orchestrator** forces domain consolidators to debate. 
+    *   *Does the road closure in SoMa impact the Fire Dept's response time to the new high-rise?*
+3.  **Marathon Loop (Continuous Mode)**: The system never sleeps. It tracks issues over days and weeks.
+    *   **Persistent Memory**: It remembers yesterday's data.
+    *   **Auto-Escalation**: If a metric is stagnant or worsening, Lighthouse autonomously raises the priority level.
+4.  **Generative Video Briefs**: The **Video Agent** converts complex JSON reports into 30-second cinematic executive briefs using **Veo 3.1** and **Imagen 4**. Stakeholders watch the news; they don't read logs.
 
-## 🧠 Key Innovations
+## 4. Key Technology
+Lighthouse is built on the bleeding edge of the Google AI stack:
 
-### 1. Marathon Orchestrator (The "Memory")
-Most dashboards forget a problem once the data refreshes. Marathon **remembers**.
-*   **Tracks** issues over weeks/months.
-*   **Escalates** items that are stagnant or worsening.
-*   **Resolves** items only when data confirms the fix.
+*   **Gemini 2.5 Pro**: The wiring of the brain. Handles complex, multi-turn reasoning and cross-domain conflict resolution.
+*   **Gemini 2.5 Flash**: The reflexes. High-speed, low-latency analysis of raw data streams.
+*   **Veo 3.1**: The storyteller. Generates photorealistic video narratives from data signals.
+*   **Imagen 4**: The visionary. Creates storyboard frames to visualize future states.
 
-### 2. Cross-Area Reasoning
-Lighthouse detects second-order effects that humans miss.
-*   *Example:* A spike in **Zoning Permits** (Land Use) combined with **Traffic Complaints** (Infrastructure) predicts a future **Emergency Response Delay** (Public Safety).
+## 5. Vision
+We are moving beyond "Smart Cities" (which are just cities with sensors) to **Autonomous Cities**—cities that can observe, orient, decide, and act.
 
-### 3. Generative Executive Briefs
-Stakeholders don't always have time to read JSON logs.
-*   **Video Agent** analyzes the top critical issue.
-*   Generates a storyboard and prompts **Veo 3.1** to create a high-definition video narrative of the situation (e.g., "Drone shot of flooding in Mission District").
+Lighthouse SF is the kernel of that future.
 
 ---
-
-## 🛠 Tech Stack
-
-*   **Frontend**: React 19, Tailwind CSS, Lucide Icons.
-*   **AI Core**: Google GenAI SDK (`@google/genai`).
-    *   **Reasoning**: Gemini 1.5 Pro / 2.5 Pro.
-    *   **Speed**: Gemini 2.5 Flash.
-    *   **Video**: Veo 3.1 (`veo-3.1-fast-generate-preview`).
-    *   **Grounding**: Google Search Grounding for live news verification.
-*   **Data Sources**: SF Open Data API (SODA), Custom News Agent APIs.
-
----
-
-## 🚀 Getting Started
-
-### Prerequisites
-*   Node.js 18+
-*   Google Cloud Project with Vertex AI / Gemini API enabled.
-*   **Veo 3.1 Access**: Required for video generation features.
-
-### Installation
-
-1.  Clone the repository.
-2.  Install dependencies:
-    ```bash
-    npm install
-    ```
-3.  Set your API Key:
-    *   The app uses `process.env.API_KEY` injected by the environment or prompts the user via the AI Studio overlay for Veo.
-4.  Run the development server:
-    ```bash
-    npm start
-    ```
-
----
-
-## 🔮 Future Roadmap
-
-*   **Real-time Sensor Integration**: IoT feeds from traffic cameras.
-*   **Budget Impact Analysis**: correlating infrastructure spend with repair velocity.
-*   **Citizen Feedback Loop**: AI analysis of social media sentiment regarding city services.
-
----
-
-*Lighthouse SF — Illuminating the future of the city.*
+*San Francisco, CA • 2026*
