@@ -139,21 +139,25 @@ export const fetchIUData = async (): Promise<string> => {
 
     // Fallback: SODA
     // 311 Metrics: mwjb-biik
-    // This dataset tracks cases. 'opened' is a common date field in 311 datasets.
+    // Street Use Permits: n4vv-wgxq (real dataset)
     const metricsQuery = `$limit=50&$order=date DESC`;
+    const streetPermitQuery = `$limit=50&$order=approved_date DESC`;
 
-    const metrics311 = await fetchSoda('mwjb-biik', metricsQuery);
+    const [metrics311, streetPermits] = await Promise.all([
+        fetchSoda('mwjb-biik', metricsQuery),
+        fetchSoda('n4vv-wgxq', streetPermitQuery)
+    ]);
 
     const result = {
         agent: "IU-4 (SODA)",
         timestamp: new Date().toISOString(),
         sources: [
             { id: "mwjb-biik", name: "311 Metrics", status: metrics311 ? "OK" : "FAILED", count: metrics311?.length || 0 },
-            { id: "manual", name: "Street Permits", status: "SIMULATED", note: "API endpoint not configured in Spec" }
+            { id: "n4vv-wgxq", name: "Street Use Permits", status: streetPermits ? "OK" : "FAILED", count: streetPermits?.length || 0 }
         ],
         data: {
             metrics_311: metrics311 || [],
-            street_permits: { note: "Simulated Snapshot", pci_score_avg: 68, active_permits: 142 }
+            street_permits: streetPermits || []
         }
     };
 
