@@ -1,7 +1,7 @@
 
-import React, { useState, useEffect, useRef } from 'react';
-import { 
-  Agent, PipelineStage, AgentStatus, IssueCard, ChartConfig, LogEntry, Area, AgentType 
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import {
+  Agent, PipelineStage, AgentStatus, IssueCard, ChartConfig, LogEntry, Area, AgentType
 } from './types';
 import { INITIAL_AGENTS, SYSTEM_INSTRUCTIONS, C } from './constants';
 import { ProcessChart } from './components/ProcessChart';
@@ -11,17 +11,25 @@ import { AgentLog } from './components/AgentLog';
 import { ActionQueue } from './components/ActionQueue';
 import { FollowUpTracker } from './components/FollowUpTracker';
 import { LandingPage } from './components/LandingPage';
-import { 
-  generateAgentContent, 
-  generateOrchestratorContent, 
-  generateReportVideo, 
-  fetchNewsWithGrounding, 
-  fetchGovData, 
+import {
+  generateAgentContent,
+  generateOrchestratorContent,
+  generateReportVideo,
+  fetchNewsWithGrounding,
+  fetchGovData,
   consolidateAreaFindings,
-  runRoundtableDiscussion
+  runRoundtableDiscussion,
+  runFollowUpCheck
 } from './services/gemini';
 import { fetchPSData, fetchIUData, fetchLZData } from './services/soda';
-import { Play, RotateCw } from 'lucide-react';
+import {
+  clearCache,
+  addPastIssue,
+  getPastIssues,
+  compareWithPastIssues,
+  type PastIssue
+} from './services/cache';
+import { Play, RotateCw, Timer } from 'lucide-react';
 
 export default function App() {
   // Navigation State
@@ -32,13 +40,27 @@ export default function App() {
   const [agents, setAgents] = useState<Agent[]>(INITIAL_AGENTS);
   const [pipelineStage, setPipelineStage] = useState<PipelineStage>(PipelineStage.IDLE);
   const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [consolidatedData, setConsolidatedData] = useState<Record<string, string>>({}); 
+  const [consolidatedData, setConsolidatedData] = useState<Record<string, string>>({});
   const [discussionLog, setDiscussionLog] = useState<string[]>([]);
   const [issueCards, setIssueCards] = useState<IssueCard[]>([]);
   const [chartConfig, setChartConfig] = useState<ChartConfig | null>(null);
   const [videoUri, setVideoUri] = useState<string | null>(null);
   const [isVideoLoading, setIsVideoLoading] = useState(false);
-  
+
+  // Marathon Mode State
+  const [marathonEnabled, setMarathonEnabled] = useState(true);
+  const [marathonCountdown, setMarathonCountdown] = useState<number | null>(null);
+  const marathonTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Follow-Up State (Stage 7)
+  const [followUpResults, setFollowUpResults] = useState<Array<{
+    pastIssue: PastIssue;
+    status: 'improving' | 'worsening' | 'stagnant' | 'new';
+  }>>([]);
+
+  const MARATHON_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+
   const addLog = (message: string, type: LogEntry['type'] = 'info', source: string = 'System') => {
     setLogs(prev => [...prev, { timestamp: new Date().toLocaleTimeString(), source, message, type }]);
   };
@@ -59,36 +81,36 @@ export default function App() {
   // --- Pipeline Logic ---
   const startFetch = async () => {
     setPipelineStage(PipelineStage.FETCH);
-    setActiveTab("process"); 
+    setActiveTab("process");
     addLog('Starting Parallel Fetch (9 Agents)...', 'info', 'Orchestrator');
-    
+
     const fetchPromises = agents.map(async (agent) => {
       updateAgent(agent.id, { status: AgentStatus.FETCHING, lastMessage: 'Connecting...' });
       try {
         let payload = "";
 
         if (agent.type === AgentType.DATA) {
-             await new Promise(r => setTimeout(r, 100 * agent.id));
-             if (agent.area === Area.PS) {
-                 payload = await fetchPSData();
-             } else if (agent.area === Area.IU) {
-                 payload = await fetchIUData();
-             } else if (agent.area === Area.LZ) {
-                 payload = await fetchLZData();
-             }
+          await new Promise(r => setTimeout(r, 100 * agent.id));
+          if (agent.area === Area.PS) {
+            payload = await fetchPSData();
+          } else if (agent.area === Area.IU) {
+            payload = await fetchIUData();
+          } else if (agent.area === Area.LZ) {
+            payload = await fetchLZData();
+          }
         } else if (agent.type === AgentType.NEWS) {
-             await new Promise(r => setTimeout(r, 100 * agent.id));
-             const keywords = getNewsKeywords(agent.area);
-             payload = await fetchNewsWithGrounding(keywords);
+          await new Promise(r => setTimeout(r, 100 * agent.id));
+          const keywords = getNewsKeywords(agent.area);
+          payload = await fetchNewsWithGrounding(keywords);
         } else if (agent.type === AgentType.GOV) {
-             await new Promise(r => setTimeout(r, 100 * agent.id));
-             payload = await fetchGovData(agent.area);
+          await new Promise(r => setTimeout(r, 100 * agent.id));
+          payload = await fetchGovData(agent.area);
         }
 
-        updateAgent(agent.id, { 
-          status: AgentStatus.ANALYZING, 
-          payload, 
-          lastMessage: 'Payload received. Queued.' 
+        updateAgent(agent.id, {
+          status: AgentStatus.ANALYZING,
+          payload,
+          lastMessage: 'Payload received. Queued.'
         });
         addLog(`${agent.name} fetched ${payload.length} chars`, 'success', agent.name);
       } catch (err) {
@@ -96,7 +118,7 @@ export default function App() {
         addLog(`Fetch failed for ${agent.name}`, 'error', agent.name);
       }
     });
-    
+
     await Promise.all(fetchPromises);
     startAnalyze();
   };
@@ -111,10 +133,10 @@ export default function App() {
           SYSTEM_INSTRUCTIONS.AGENT_ANALYZE(agent),
           `Analyze this payload: ${agent.payload}`
         );
-        updateAgent(agent.id, { 
-          status: AgentStatus.DONE, 
-          analysis, 
-          lastMessage: 'Analysis complete.' 
+        updateAgent(agent.id, {
+          status: AgentStatus.DONE,
+          analysis,
+          lastMessage: 'Analysis complete.'
         });
       } catch (err) {
         updateAgent(agent.id, { status: AgentStatus.ERROR, lastMessage: 'Analysis failed.' });
@@ -129,15 +151,15 @@ export default function App() {
     addLog('Consolidating per Area (Stage 3)...', 'info', 'Orchestrator');
     const areas = [Area.PS, Area.IU, Area.LZ];
     const newConsolidatedData: Record<string, string> = {};
-    
+
     for (const area of areas) {
       const areaAgents = agents.filter(a => a.area === area && a.analysis);
       const combinedAnalysis = areaAgents.map(a => `${a.name}: ${a.analysis}`).join('\n\n');
-      
+
       try {
         const reportJson = await consolidateAreaFindings(
-            SYSTEM_INSTRUCTIONS.CONSOLIDATOR(area),
-            `Consolidate these reports into structured JSON:\n${combinedAnalysis}`
+          SYSTEM_INSTRUCTIONS.CONSOLIDATOR(area),
+          `Consolidate these reports into structured JSON:\n${combinedAnalysis}`
         );
         newConsolidatedData[area] = reportJson;
         addLog(`${area} consolidation complete.`, 'success', 'Consolidator');
@@ -153,31 +175,31 @@ export default function App() {
   const startDiscussion = async (reports: Record<string, string>) => {
     setPipelineStage(PipelineStage.DISCUSS);
     addLog('Cross-Area Roundtable (Stage 4) initiated...', 'info', 'Orchestrator');
-    
+
     try {
-        const discussionJson = await runRoundtableDiscussion(reports);
-        
-        const trace = discussionJson.thoughts || "Roundtable completed.";
-        setDiscussionLog([trace]);
-        addLog(`Roundtable complete. Trace: ${trace.substring(0,60)}...`, 'success', 'Orchestrator');
-        
-        generateCards(reports, discussionJson);
+      const discussionJson = await runRoundtableDiscussion(reports);
+
+      const trace = discussionJson.thoughts || "Roundtable completed.";
+      setDiscussionLog([trace]);
+      addLog(`Roundtable complete. Trace: ${trace.substring(0, 60)}...`, 'success', 'Orchestrator');
+
+      generateCards(reports, discussionJson);
 
     } catch (e) {
-        console.error("Roundtable failed", e);
-        addLog('Roundtable failed. Fallback to individual reports.', 'error', 'Orchestrator');
-        generateCards(reports, { thoughts: "Discussion Failed", single_area_issues: [], cross_area_issues: [] });
+      console.error("Roundtable failed", e);
+      addLog('Roundtable failed. Fallback to individual reports.', 'error', 'Orchestrator');
+      generateCards(reports, { thoughts: "Discussion Failed", single_area_issues: [], cross_area_issues: [] });
     }
   };
 
   const generateCards = async (reports: Record<string, string>, discussionData: any) => {
     setPipelineStage(PipelineStage.CARDS);
     addLog('Generating Issue Cards...', 'info', 'Orchestrator');
-    
+
     const reportsText = Object.entries(reports)
       .map(([area, json]) => `AREA: ${area}\nREPORT: ${json}`)
       .join('\n---\n');
-      
+
     const discussionText = JSON.stringify(discussionData, null, 2);
 
     try {
@@ -207,20 +229,114 @@ export default function App() {
         SYSTEM_INSTRUCTIONS.CHART_GENERATOR,
         `Create a chart config based on these issues: ${cardContext}`
       );
-       const cleanJson = jsonStr.replace(/```json/g, '').replace(/```/g, '').trim();
-       const config = JSON.parse(cleanJson);
-       setChartConfig(config);
-       addLog('Chart generated.', 'success', 'Chart Agent');
+      const cleanJson = jsonStr.replace(/```json/g, '').replace(/```/g, '').trim();
+      const config = JSON.parse(cleanJson);
+      setChartConfig(config);
+      addLog('Chart generated.', 'success', 'Chart Agent');
     } catch (err) {
-       addLog('Failed to generate chart.', 'warning', 'Chart Agent');
+      addLog('Failed to generate chart.', 'warning', 'Chart Agent');
     }
     finishPipeline();
   };
 
-  const finishPipeline = () => {
+  const finishPipeline = async () => {
+    // Stage 7: Follow-Up Check (compare current with past issues)
+    setPipelineStage(PipelineStage.FOLLOW_UP);
+    addLog('Stage 7: Performing Follow-Up Check...', 'info', 'Marathon Orchestrator');
+
+    try {
+      const pastIssues = getPastIssues();
+      if (pastIssues.length > 0 && issueCards.length > 0) {
+        // Build fresh data summary from agents
+        const freshDataSummary = agents
+          .filter(a => a.analysis)
+          .map(a => `${a.name}: ${a.analysis?.slice(0, 200)}...`)
+          .join('\n');
+
+        const followUpRes = await runFollowUpCheck(
+          pastIssues.map(p => ({ id: p.id, title: p.title, severity: p.severity, dataRefs: p.dataRefs })),
+          freshDataSummary
+        );
+
+        setFollowUpResults(followUpRes.map(r => ({
+          pastIssue: pastIssues.find(p => p.id === r.issueId) || pastIssues[0],
+          status: r.status
+        })));
+
+        const escalated = followUpRes.filter(r => r.escalate);
+        if (escalated.length > 0) {
+          addLog(`⚠️ ${escalated.length} issues escalated (worsening)`, 'warning', 'Marathon Orchestrator');
+        }
+        addLog(`Follow-up complete: ${followUpRes.length} past issues checked.`, 'success', 'Marathon Orchestrator');
+      }
+    } catch (e) {
+      addLog('Follow-up check failed.', 'warning', 'Marathon Orchestrator');
+    }
+
+    // Store current issues as past issues for next cycle
+    issueCards.forEach(card => {
+      addPastIssue({
+        id: card.id,
+        title: card.title,
+        areas: card.areas,
+        severity: card.severity,
+        dataRefs: card.data_refs
+      });
+    });
+
+    // Clear data cache for next marathon cycle
+    clearCache();
+
+    // Enter Marathon mode
     setPipelineStage(PipelineStage.MARATHON);
-    addLog('Pipeline Cycle Complete. Waiting for Video or Restart.', 'success', 'System');
+    addLog('Pipeline Cycle Complete. Entering Marathon Mode.', 'success', 'System');
+
+    // Start 5-minute auto-restart timer if enabled
+    if (marathonEnabled) {
+      startMarathonTimer();
+    }
   };
+
+  // Marathon Timer Functions
+  const startMarathonTimer = () => {
+    // Clear any existing timers
+    if (marathonTimerRef.current) clearTimeout(marathonTimerRef.current);
+    if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
+
+    setMarathonCountdown(MARATHON_INTERVAL_MS / 1000);
+    addLog(`Marathon Timer: Auto-restart in 5 minutes.`, 'info', 'System');
+
+    // Countdown display update every second
+    countdownIntervalRef.current = setInterval(() => {
+      setMarathonCountdown(prev => {
+        if (prev === null || prev <= 1) return null;
+        return prev - 1;
+      });
+    }, 1000);
+
+    // Main restart timer
+    marathonTimerRef.current = setTimeout(() => {
+      if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
+      setMarathonCountdown(null);
+      addLog('Marathon Timer: Initiating auto-restart...', 'info', 'System');
+      startFetch();
+    }, MARATHON_INTERVAL_MS);
+  };
+
+  const cancelMarathonTimer = () => {
+    if (marathonTimerRef.current) clearTimeout(marathonTimerRef.current);
+    if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
+    setMarathonCountdown(null);
+    addLog('Marathon Timer cancelled.', 'info', 'System');
+  };
+
+  // Cleanup timers on unmount
+  useEffect(() => {
+    return () => {
+      if (marathonTimerRef.current) clearTimeout(marathonTimerRef.current);
+      if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
+    };
+  }, []);
 
   const handleGenerateVideo = async () => {
     if (pipelineStage < PipelineStage.CARDS) return;
@@ -273,21 +389,56 @@ export default function App() {
         </div>
         <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
           <div style={{ display: "flex", gap: 6 }}>
-            {[{a:"ps",c:C.ps},{a:"iu",c:C.iu},{a:"lz",c:C.lz}].map(({a,c}) => (
+            {[{ a: "ps", c: C.ps }, { a: "iu", c: C.iu }, { a: "lz", c: C.lz }].map(({ a, c }) => (
               <div key={a} style={{ display: "flex", alignItems: "center", gap: 4 }}>
                 <div style={{ width: 8, height: 8, borderRadius: "50%", background: c }} />
                 <span style={{ fontSize: 10, color: C.gray1, fontWeight: 600 }}>{a.toUpperCase()}</span>
               </div>
             ))}
           </div>
-          <button 
-            onClick={startFetch}
+          {/* Marathon Countdown */}
+          {marathonCountdown !== null && (
+            <div className="flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-lg">
+              <Timer size={12} className="text-slate-500" />
+              <span className="text-[10px] font-mono font-bold text-slate-600">
+                {Math.floor(marathonCountdown / 60)}:{String(marathonCountdown % 60).padStart(2, '0')}
+              </span>
+              <button
+                onClick={cancelMarathonTimer}
+                className="text-[9px] text-red-500 hover:text-red-600 font-bold"
+              >
+                STOP
+              </button>
+            </div>
+          )}
+
+          {/* Marathon Toggle */}
+          <button
+            onClick={() => {
+              setMarathonEnabled(!marathonEnabled);
+              if (marathonEnabled && marathonCountdown !== null) {
+                cancelMarathonTimer();
+              }
+            }}
+            className={`text-[9px] px-2 py-1 rounded font-bold transition-colors ${marathonEnabled
+                ? 'bg-emerald-100 text-emerald-600 hover:bg-emerald-200'
+                : 'bg-slate-100 text-slate-400 hover:bg-slate-200'
+              }`}
+          >
+            {marathonEnabled ? 'AUTO' : 'MANUAL'}
+          </button>
+
+          <button
+            onClick={() => {
+              if (marathonCountdown !== null) cancelMarathonTimer();
+              startFetch();
+            }}
             disabled={pipelineStage !== PipelineStage.IDLE && pipelineStage !== PipelineStage.MARATHON}
             style={{ fontSize: 10, color: C.white, background: C.mint, padding: "6px 14px", borderRadius: 12, fontWeight: 600, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
             className="disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90 transition-opacity shadow-md"
           >
-             {pipelineStage === PipelineStage.IDLE || pipelineStage === PipelineStage.MARATHON ? <Play size={12} fill="white" /> : <RotateCw size={12} className="animate-spin" />}
-             {pipelineStage === PipelineStage.IDLE ? 'START PIPELINE' : pipelineStage === PipelineStage.MARATHON ? 'RESTART' : `STAGE ${pipelineStage} / 9`}
+            {pipelineStage === PipelineStage.IDLE || pipelineStage === PipelineStage.MARATHON ? <Play size={12} fill="white" /> : <RotateCw size={12} className="animate-spin" />}
+            {pipelineStage === PipelineStage.IDLE ? 'START PIPELINE' : pipelineStage === PipelineStage.MARATHON ? 'RESTART' : `STAGE ${pipelineStage} / 9`}
           </button>
         </div>
       </div>
@@ -308,19 +459,19 @@ export default function App() {
 
       {/* ── CONTENT ── */}
       <div style={{ padding: "16px 28px 28px", background: C.white, margin: "0 28px 28px 28px", borderRadius: "0 8px 8px 8px", boxShadow: "0 1px 4px rgba(0,0,0,0.05)", minHeight: 480, flex: 1 }}>
-        
+
         {activeTab === "issues" && <IssueFeed cards={issueCards} />}
         {activeTab === "process" && <ProcessChart agents={agents} stage={pipelineStage} />}
         {activeTab === "log" && <AgentLog logs={logs} />}
         {activeTab === "forecast" && <ForecastPanel config={chartConfig} />}
-        {activeTab === "followup" && <FollowUpTracker />}
+        {activeTab === "followup" && <FollowUpTracker followUpResults={followUpResults} />}
         {activeTab === "queue" && (
-           <ActionQueue 
-              cards={issueCards} 
-              onGenerateVideo={handleGenerateVideo} 
-              videoUri={videoUri} 
-              isVideoLoading={isVideoLoading} 
-            />
+          <ActionQueue
+            cards={issueCards}
+            onGenerateVideo={handleGenerateVideo}
+            videoUri={videoUri}
+            isVideoLoading={isVideoLoading}
+          />
         )}
 
       </div>

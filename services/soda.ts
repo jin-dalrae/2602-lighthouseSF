@@ -70,9 +70,21 @@ async function fetchSoda(datasetId: string, queryParams: string) {
 
 // Agent 1: Public Safety Data
 export const fetchPSData = async (): Promise<string> => {
+    const cacheKey = 'PS_DATA';
+
+    // Check cache first to avoid redundant fetches
+    const cached = getCachedData(cacheKey);
+    if (cached) {
+        console.log('[PS Data Agent] Using cached data (within marathon cycle)');
+        return cached;
+    }
+
     // Try External Agent First
     const externalData = await fetchFromExternalAgent("PS");
-    if (externalData) return externalData;
+    if (externalData) {
+        setCachedData(cacheKey, externalData);
+        return externalData;
+    }
 
     // Fallback: SODA
     // Police: last 7 days
@@ -102,14 +114,28 @@ export const fetchPSData = async (): Promise<string> => {
         }
     };
 
-    return JSON.stringify(result, null, 2);
+    const resultStr = JSON.stringify(result, null, 2);
+    setCachedData(cacheKey, resultStr);
+    return resultStr;
 };
 
 // Agent 4: Infrastructure Data
 export const fetchIUData = async (): Promise<string> => {
+    const cacheKey = 'IU_DATA';
+
+    // Check cache first
+    const cached = getCachedData(cacheKey);
+    if (cached) {
+        console.log('[IU Data Agent] Using cached data (within marathon cycle)');
+        return cached;
+    }
+
     // Try External Agent First
     const externalData = await fetchFromExternalAgent("IU");
-    if (externalData) return externalData;
+    if (externalData) {
+        setCachedData(cacheKey, externalData);
+        return externalData;
+    }
 
     // Fallback: SODA
     // 311 Metrics: mwjb-biik
@@ -130,14 +156,29 @@ export const fetchIUData = async (): Promise<string> => {
             street_permits: { note: "Simulated Snapshot", pci_score_avg: 68, active_permits: 142 }
         }
     };
-    return JSON.stringify(result, null, 2);
+
+    const resultStr = JSON.stringify(result, null, 2);
+    setCachedData(cacheKey, resultStr);
+    return resultStr;
 };
 
 // Agent 7: Land Use Data
 export const fetchLZData = async (): Promise<string> => {
+    const cacheKey = 'LZ_DATA';
+
+    // Check cache first
+    const cached = getCachedData(cacheKey);
+    if (cached) {
+        console.log('[LZ Data Agent] Using cached data (within marathon cycle)');
+        return cached;
+    }
+
     // Try External Agent First
     const externalData = await fetchFromExternalAgent("LZ");
-    if (externalData) return externalData;
+    if (externalData) {
+        setCachedData(cacheKey, externalData);
+        return externalData;
+    }
 
     // Fallback: SODA
     // Building Permits: i98e-djp9 | last 90d
@@ -156,5 +197,8 @@ export const fetchLZData = async (): Promise<string> => {
             building_permits: permits || []
         }
     };
-    return JSON.stringify(result, null, 2);
+
+    const resultStr = JSON.stringify(result, null, 2);
+    setCachedData(cacheKey, resultStr);
+    return resultStr;
 };

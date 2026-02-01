@@ -1,5 +1,6 @@
 import React from 'react';
 import { IssueCard, Area } from '../types';
+import { C } from '../constants';
 import { AlertCircle, AlertTriangle, Info } from 'lucide-react';
 
 interface Props {
@@ -41,32 +42,36 @@ export const IssueCardDeck: React.FC<Props> = ({ cards }) => {
             <div className={`w-1.5 ${getSeverityColor(card.severity)}`} />
             <div className="p-4 flex-1">
               <div className="flex justify-between items-start mb-2">
-                <span className={`text-[10px] font-bold uppercase tracking-widest ${getAreaColor(card.area)}`}>
-                  {card.area}
+                {/* Fixed: Use card.areas[0] instead of card.area */}
+                <span className={`text-[10px] font-bold uppercase tracking-widest ${getAreaColor(card.areas[0])}`}>
+                  {card.areas.map(a => a.split(' ')[0]).join(' + ')}
                 </span>
                 <span className={`text-[10px] px-2 py-0.5 rounded-full bg-slate-900 border border-slate-700 text-slate-300`}>
                   {card.severity}
                 </span>
               </div>
-              
+
               <h3 className="text-sm font-bold text-white mb-2 leading-tight">{card.title}</h3>
-              <p className="text-xs text-slate-400 mb-4 line-clamp-3">{card.description}</p>
-              
+              {/* Fixed: Use card.summary instead of card.description */}
+              <p className="text-xs text-slate-400 mb-4 line-clamp-3">{card.summary}</p>
+
               <div className="border-t border-slate-700/50 pt-3 mt-auto">
-                 <div className="flex items-center gap-2 mb-2">
-                    <span className="text-[10px] text-slate-500 font-mono">SOURCES:</span>
-                    <div className="flex gap-1 flex-wrap">
-                        {card.sources.map(s => (
-                            <span key={s} className="text-[9px] bg-slate-900 text-slate-400 px-1.5 py-0.5 rounded">
-                                {s}
-                            </span>
-                        ))}
-                    </div>
-                 </div>
-                 <div className="bg-slate-900/50 rounded p-2 border border-slate-800/50 flex gap-2">
-                    <AlertCircle size={12} className="text-blue-400 shrink-0 mt-0.5" />
-                    <span className="text-[10px] text-blue-200/80 font-mono">{card.actionItem}</span>
-                 </div>
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-[10px] text-slate-500 font-mono">SOURCES:</span>
+                  <div className="flex gap-1 flex-wrap">
+                    {/* Fixed: Use card.data_refs instead of card.sources */}
+                    {card.data_refs.slice(0, 3).map(s => (
+                      <span key={s} className="text-[9px] bg-slate-900 text-slate-400 px-1.5 py-0.5 rounded">
+                        {s.length > 20 ? s.slice(0, 20) + '...' : s}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                <div className="bg-slate-900/50 rounded p-2 border border-slate-800/50 flex gap-2">
+                  <AlertCircle size={12} className="text-blue-400 shrink-0 mt-0.5" />
+                  {/* Fixed: Use card.action_item instead of card.actionItem */}
+                  <span className="text-[10px] text-blue-200/80 font-mono">{card.action_item}</span>
+                </div>
               </div>
             </div>
           </div>
