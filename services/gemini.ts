@@ -45,43 +45,11 @@ export const generateAgentContent = async (
   }
 };
 
-// News Agent with External API + Grounding Fallback
+// News Agent using Gemini Search Grounding
 export const fetchNewsWithGrounding = async (
   keywords: string
 ): Promise<string> => {
-  // 1. Try External News Agent API
-  try {
-    const NEWS_AGENT_URL = "https://news-agent-1-322642533000.us-west1.run.app/";
-
-    // We assume the agent accepts a query parameter 'q' or 'topic'.
-    const url = new URL(NEWS_AGENT_URL);
-    url.searchParams.append("q", keywords);
-
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000); // 8s timeout
-
-    const response = await fetch(url.toString(), {
-      signal: controller.signal,
-      headers: { 'Accept': 'application/json' }
-    });
-
-    clearTimeout(timeout);
-
-    if (response.ok) {
-      const data = await response.json();
-      // Tag it so we know it came from the external agent
-      return JSON.stringify({
-        source: "External News Agent",
-        keywords,
-        ...data
-      }, null, 2);
-    }
-    console.warn("External News Agent returned non-200:", response.status);
-  } catch (error) {
-    console.warn("External News Agent failed, falling back to Gemini Grounding:", error);
-  }
-
-  // 2. Fallback: Gemini Search Grounding
+  // Use Gemini Search Grounding directly (no external agent - causes CORS issues)
   try {
     const ai = createClient();
     const prompt = `Search nbcbayarea.com for recent news regarding: ${keywords}.
@@ -327,6 +295,44 @@ export const generateOrchestratorContent = async (
   } catch (error) {
     console.error("Orchestrator Error:", error);
     throw error;
+  }
+};
+
+// Generate a 3-part video script based on the issue
+export const generateVideoScript = async (
+  issueTitle: string,
+  issueSummary: string
+): Promise<string[]> => {
+  try {
+    const ai = createClient();
+    const prompt = `You are a documentary filmmaker. Create a 3-part video storyboard script for a short report about the San Francisco city issue: "${issueTitle}".
+    Summary: ${issueSummary}
+    
+    For each part, provide a highly descriptive prompt (shot-by-shot details) for a video generation AI (Veo 3.1).
+    Part 1: The Problem - A cinematic establishing shot of a SF neighborhood or landmark affected by this specific issue. 
+    Part 2: The Evidence - A shot that visualizes the data or the impact. (e.g., if it's crime, show police activity; if it's infrastructure, show construction or decay).
+    Part 3: The Future - A hopeful or contemplative closing shot of the SF skyline or community, representing the forecast or action impact.
+    
+    Output STRICT JSON array of 3 strings: ["prompt 1", "prompt 2", "prompt 3"]`;
+
+    const response = await ai.models.generateContent({
+      model: MODEL_FLASH,
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        temperature: 0.7
+      }
+    });
+
+    const jsonStr = cleanJson(response.text || "[]");
+    return JSON.parse(jsonStr);
+  } catch (error) {
+    console.error("Video Script Generation Error:", error);
+    return [
+      `Cinematic drone shot of San Francisco, representing the issue: ${issueTitle}. Photorealistic, 4K.`,
+      `Street level view in San Francisco showing impact of ${issueTitle}. Documentary style.`,
+      `Establishing shot of San Francisco Bay Area at dawn, contemplative mood.`
+    ];
   }
 };
 

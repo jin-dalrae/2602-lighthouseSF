@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Agent, PipelineStage, AgentStatus, IssueCard, ChartConfig, LogEntry, Area, AgentType
 } from './types';
@@ -11,10 +11,13 @@ import { AgentLog } from './components/AgentLog';
 import { ActionQueue } from './components/ActionQueue';
 import { FollowUpTracker } from './components/FollowUpTracker';
 import { LandingPage } from './components/LandingPage';
+import { IssueDetailModal } from './components/IssueDetailModal';
 import {
   generateAgentContent,
   generateOrchestratorContent,
+  generateVideoScript,
   generateReportVideo,
+  generateEnhancedReportVideo,
   fetchNewsWithGrounding,
   fetchGovData,
   consolidateAreaFindings,
@@ -26,10 +29,16 @@ import {
   clearCache,
   addPastIssue,
   getPastIssues,
-  compareWithPastIssues,
   type PastIssue
 } from './services/cache';
-import { Play, RotateCw, Timer } from 'lucide-react';
+import {
+  initFirebase,
+  saveAllIssues,
+  loadAllIssues,
+  updateIssueStatus,
+  StoredIssue
+} from './services/firebase';
+import { Play, Square } from 'lucide-react';
 
 export default function App() {
   // Navigation State
@@ -44,14 +53,18 @@ export default function App() {
   const [discussionLog, setDiscussionLog] = useState<string[]>([]);
   const [issueCards, setIssueCards] = useState<IssueCard[]>([]);
   const [chartConfig, setChartConfig] = useState<ChartConfig | null>(null);
-  const [videoUri, setVideoUri] = useState<string | null>(null);
+  const [videoUris, setVideoUris] = useState<string[]>([]);
   const [isVideoLoading, setIsVideoLoading] = useState(false);
+  const [videoProgress, setVideoProgress] = useState("");
 
-  // Marathon Mode State
-  const [marathonEnabled, setMarathonEnabled] = useState(true);
-  const [marathonCountdown, setMarathonCountdown] = useState<number | null>(null);
-  const marathonTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Pipeline running state
+  const [isRunning, setIsRunning] = useState(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Firebase stored issues
+  const [storedIssues, setStoredIssues] = useState<StoredIssue[]>([]);
+  const [isLoadingIssues, setIsLoadingIssues] = useState(true);
+  const [selectedIssue, setSelectedIssue] = useState<StoredIssue | null>(null);
 
   // Follow-Up State (Stage 7)
   const [followUpResults, setFollowUpResults] = useState<Array<{
@@ -59,7 +72,25 @@ export default function App() {
     status: 'improving' | 'worsening' | 'stagnant' | 'new';
   }>>([]);
 
-  const MARATHON_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+  // Initialize Firebase and load issues on mount
+  useEffect(() => {
+    initFirebase();
+    loadStoredIssues();
+  }, []);
+
+  const loadStoredIssues = async () => {
+    setIsLoadingIssues(true);
+    try {
+      const issues = await loadAllIssues();
+      setStoredIssues(issues);
+      addLog(`Loaded ${issues.length} stored issues from database.`, 'success', 'Firebase');
+    } catch (err) {
+      console.error('Failed to load issues:', err);
+      addLog('Failed to load stored issues.', 'error', 'Firebase');
+    } finally {
+      setIsLoadingIssues(false);
+    }
+  };
 
   const addLog = (message: string, type: LogEntry['type'] = 'info', source: string = 'System') => {
     setLogs(prev => [...prev, { timestamp: new Date().toLocaleTimeString(), source, message, type }]);
@@ -80,6 +111,8 @@ export default function App() {
 
   // --- Pipeline Logic ---
   const startFetch = async () => {
+    setIsRunning(true);
+    abortControllerRef.current = new AbortController();
     setPipelineStage(PipelineStage.FETCH);
     setActiveTab("process");
     addLog('Starting Parallel Fetch (9 Agents)...', 'info', 'Orchestrator');
@@ -284,80 +317,81 @@ export default function App() {
       });
     });
 
-    // Clear data cache for next marathon cycle
+    // Save issues to Firebase with full context
+    try {
+      addLog('Saving issues to database...', 'info', 'Firebase');
+      await saveAllIssues(
+        issueCards,
+        agents.map(a => ({ name: a.name, analysis: a.analysis, payload: a.payload })),
+        logs
+      );
+      addLog(`Saved ${issueCards.length} issues to database.`, 'success', 'Firebase');
+      // Reload stored issues to include new ones
+      await loadStoredIssues();
+    } catch (err) {
+      console.error('Failed to save issues:', err);
+      addLog('Failed to save issues to database.', 'error', 'Firebase');
+    }
+
+    // Clear data cache for next cycle
     clearCache();
 
-    // Enter Marathon mode
+    // Pipeline complete
     setPipelineStage(PipelineStage.MARATHON);
-    addLog('Pipeline Cycle Complete. Entering Marathon Mode.', 'success', 'System');
+    setIsRunning(false);
+    addLog('Pipeline Cycle Complete.', 'success', 'System');
+  };
 
-    // Start 5-minute auto-restart timer if enabled
-    if (marathonEnabled) {
-      startMarathonTimer();
+  // Stop pipeline
+  const stopPipeline = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
     }
+    setIsRunning(false);
+    setPipelineStage(PipelineStage.IDLE);
+    addLog('Pipeline stopped by user.', 'warning', 'System');
   };
-
-  // Marathon Timer Functions
-  const startMarathonTimer = () => {
-    // Clear any existing timers
-    if (marathonTimerRef.current) clearTimeout(marathonTimerRef.current);
-    if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
-
-    setMarathonCountdown(MARATHON_INTERVAL_MS / 1000);
-    addLog(`Marathon Timer: Auto-restart in 5 minutes.`, 'info', 'System');
-
-    // Countdown display update every second
-    countdownIntervalRef.current = setInterval(() => {
-      setMarathonCountdown(prev => {
-        if (prev === null || prev <= 1) return null;
-        return prev - 1;
-      });
-    }, 1000);
-
-    // Main restart timer
-    marathonTimerRef.current = setTimeout(() => {
-      if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
-      setMarathonCountdown(null);
-      addLog('Marathon Timer: Initiating auto-restart...', 'info', 'System');
-      startFetch();
-    }, MARATHON_INTERVAL_MS);
-  };
-
-  const cancelMarathonTimer = () => {
-    if (marathonTimerRef.current) clearTimeout(marathonTimerRef.current);
-    if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
-    setMarathonCountdown(null);
-    addLog('Marathon Timer cancelled.', 'info', 'System');
-  };
-
-  // Cleanup timers on unmount
-  useEffect(() => {
-    return () => {
-      if (marathonTimerRef.current) clearTimeout(marathonTimerRef.current);
-      if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
-    };
-  }, []);
 
   const handleGenerateVideo = async () => {
     if (pipelineStage < PipelineStage.CARDS) return;
     setIsVideoLoading(true);
-    addLog('Initializing Veo 3.1 Video Generation...', 'info', 'Video Agent');
+    setVideoUris([]);
+    setVideoProgress("Analyzing issue and writing script...");
+    addLog('Starting Multi-Part Video Synthesis...', 'info', 'Video Agent');
+
     try {
       const topIssue = issueCards[0];
-      const prompt = `A photorealistic, cinematic drone shot of San Francisco, representing the issue: ${topIssue.title}. ${topIssue.description}. High quality, 4k, urban documentary style.`;
-      const result = await generateReportVideo(prompt);
-      if (result) {
-        const apiKey = process.env.API_KEY || '';
-        const response = await fetch(`${result.uri}&key=${apiKey}`);
-        const blob = await response.blob();
-        const blobUrl = URL.createObjectURL(blob);
-        setVideoUri(blobUrl);
-        addLog('Video generated successfully.', 'success', 'Video Agent');
+
+      // Step 1: Generate Script
+      const script = await generateVideoScript(topIssue.title, topIssue.summary);
+      addLog(`Storylined 3-part brief: ${script.length} scenes planned.`, 'info', 'Video Agent');
+
+      const newUris: string[] = [];
+      const apiKey = process.env.API_KEY || '';
+
+      // Step 2: Generate Clips
+      for (let i = 0; i < script.length; i++) {
+        setVideoProgress(`Generating Scene ${i + 1}/3...`);
+        addLog(`Synthesizing Scene ${i + 1}: ${script[i].slice(0, 50)}...`, 'info', 'Video Agent');
+
+        const result = await generateReportVideo(script[i]);
+        if (result) {
+          const response = await fetch(`${result.uri}&key=${apiKey}`);
+          const blob = await response.blob();
+          const blobUrl = URL.createObjectURL(blob);
+          newUris.push(blobUrl);
+          setVideoUris([...newUris]); // Update UI progressively
+          addLog(`Scene ${i + 1} ready.`, 'success', 'Video Agent');
+        }
       }
+
+      addLog('Full Video Report Synthesis Complete.', 'success', 'Video Agent');
     } catch (err: any) {
+      console.error(err);
       addLog(`Video generation failed: ${err.message}`, 'error', 'Video Agent');
     } finally {
       setIsVideoLoading(false);
+      setVideoProgress("");
     }
   };
 
@@ -396,50 +430,27 @@ export default function App() {
               </div>
             ))}
           </div>
-          {/* Marathon Countdown */}
-          {marathonCountdown !== null && (
-            <div className="flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-lg">
-              <Timer size={12} className="text-slate-500" />
-              <span className="text-[10px] font-mono font-bold text-slate-600">
-                {Math.floor(marathonCountdown / 60)}:{String(marathonCountdown % 60).padStart(2, '0')}
-              </span>
-              <button
-                onClick={cancelMarathonTimer}
-                className="text-[9px] text-red-500 hover:text-red-600 font-bold"
-              >
-                STOP
-              </button>
-            </div>
+
+          {/* START / STOP Button */}
+          {isRunning ? (
+            <button
+              onClick={stopPipeline}
+              style={{ fontSize: 10, color: C.white, background: '#EF4444', padding: "6px 14px", borderRadius: 12, fontWeight: 600, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
+              className="hover:opacity-90 transition-opacity shadow-md"
+            >
+              <Square size={12} fill="white" />
+              STOP ({pipelineStage} / 9)
+            </button>
+          ) : (
+            <button
+              onClick={startFetch}
+              style={{ fontSize: 10, color: C.white, background: C.mint, padding: "6px 14px", borderRadius: 12, fontWeight: 600, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
+              className="hover:opacity-90 transition-opacity shadow-md"
+            >
+              <Play size={12} fill="white" />
+              START PIPELINE
+            </button>
           )}
-
-          {/* Marathon Toggle */}
-          <button
-            onClick={() => {
-              setMarathonEnabled(!marathonEnabled);
-              if (marathonEnabled && marathonCountdown !== null) {
-                cancelMarathonTimer();
-              }
-            }}
-            className={`text-[9px] px-2 py-1 rounded font-bold transition-colors ${marathonEnabled
-                ? 'bg-emerald-100 text-emerald-600 hover:bg-emerald-200'
-                : 'bg-slate-100 text-slate-400 hover:bg-slate-200'
-              }`}
-          >
-            {marathonEnabled ? 'AUTO' : 'MANUAL'}
-          </button>
-
-          <button
-            onClick={() => {
-              if (marathonCountdown !== null) cancelMarathonTimer();
-              startFetch();
-            }}
-            disabled={pipelineStage !== PipelineStage.IDLE && pipelineStage !== PipelineStage.MARATHON}
-            style={{ fontSize: 10, color: C.white, background: C.mint, padding: "6px 14px", borderRadius: 12, fontWeight: 600, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
-            className="disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90 transition-opacity shadow-md"
-          >
-            {pipelineStage === PipelineStage.IDLE || pipelineStage === PipelineStage.MARATHON ? <Play size={12} fill="white" /> : <RotateCw size={12} className="animate-spin" />}
-            {pipelineStage === PipelineStage.IDLE ? 'START PIPELINE' : pipelineStage === PipelineStage.MARATHON ? 'RESTART' : `STAGE ${pipelineStage} / 9`}
-          </button>
         </div>
       </div>
 
@@ -460,7 +471,14 @@ export default function App() {
       {/* ── CONTENT ── */}
       <div style={{ padding: "16px 28px 28px", background: C.white, margin: "0 28px 28px 28px", borderRadius: "0 8px 8px 8px", boxShadow: "0 1px 4px rgba(0,0,0,0.05)", minHeight: 480, flex: 1 }}>
 
-        {activeTab === "issues" && <IssueFeed cards={issueCards} />}
+        {activeTab === "issues" && (
+          <IssueFeed
+            cards={storedIssues}
+            onCardClick={(issue) => setSelectedIssue(issue)}
+            onRefresh={loadStoredIssues}
+            isLoading={isLoadingIssues}
+          />
+        )}
         {activeTab === "process" && <ProcessChart agents={agents} stage={pipelineStage} />}
         {activeTab === "log" && <AgentLog logs={logs} />}
         {activeTab === "forecast" && <ForecastPanel config={chartConfig} />}
@@ -469,12 +487,30 @@ export default function App() {
           <ActionQueue
             cards={issueCards}
             onGenerateVideo={handleGenerateVideo}
-            videoUri={videoUri}
+            videoUris={videoUris}
             isVideoLoading={isVideoLoading}
+            videoProgress={videoProgress}
           />
         )}
 
       </div>
+
+      {/* Issue Detail Modal */}
+      {selectedIssue && (
+        <IssueDetailModal
+          issue={selectedIssue}
+          onClose={() => setSelectedIssue(null)}
+          onStatusChange={async (status) => {
+            try {
+              await updateIssueStatus(`issue_${selectedIssue.id}_${new Date(selectedIssue.createdAt).getTime()}`, status);
+              setSelectedIssue({ ...selectedIssue, status });
+              await loadStoredIssues();
+            } catch (err) {
+              console.error('Failed to update status:', err);
+            }
+          }}
+        />
+      )}
     </div>
   );
 }

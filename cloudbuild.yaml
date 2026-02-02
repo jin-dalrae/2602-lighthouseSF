@@ -1,0 +1,44 @@
+steps:
+  # Build the container image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '--build-arg'
+      - 'GEMINI_API_KEY=${_GEMINI_API_KEY}'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/lighthousesf:$BUILD_ID'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/lighthousesf:latest'
+      - '.'
+
+  # Push the container image to Container Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/lighthousesf:$BUILD_ID']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/lighthousesf:latest']
+
+  # Deploy to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'lighthouse-sf'
+      - '--image'
+      - 'gcr.io/$PROJECT_ID/lighthousesf:$BUILD_ID'
+      - '--region'
+      - 'us-central1'
+      - '--platform'
+      - 'managed'
+      - '--allow-unauthenticated'
+
+images:
+  - 'gcr.io/$PROJECT_ID/lighthousesf:$BUILD_ID'
+  - 'gcr.io/$PROJECT_ID/lighthousesf:latest'
+
+substitutions:
+  _GEMINI_API_KEY: ''
+
+options:
+  logging: CLOUD_LOGGING_ONLY

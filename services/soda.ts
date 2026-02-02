@@ -1,9 +1,8 @@
 // services/soda.ts
 
-import { getCachedData, setCachedData, hasDataChanged } from './cache';
+import { getCachedData, setCachedData } from './cache';
 
 const SODA_BASE = "https://data.sfgov.org/resource";
-const DATA_AGENT_URL = "https://sf-data-intel-agent-1006908265321.us-west1.run.app/";
 
 // Helper for dates (YYYY-MM-DD)
 const getSimpleDate = (daysAgo: number) => {
@@ -11,38 +10,6 @@ const getSimpleDate = (daysAgo: number) => {
     d.setDate(d.getDate() - daysAgo);
     return d.toISOString().split('T')[0];
 };
-
-async function fetchFromExternalAgent(area: string): Promise<string | null> {
-    try {
-        const url = new URL(DATA_AGENT_URL);
-        url.searchParams.append("area", area);
-
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 8000); // 8s timeout
-
-        const response = await fetch(url.toString(), {
-            signal: controller.signal,
-            headers: { 'Accept': 'application/json' }
-        });
-        clearTimeout(timeout);
-
-        if (response.ok) {
-            const data = await response.json();
-            return JSON.stringify({
-                agent: `${area}-External (Data Agent)`,
-                timestamp: new Date().toISOString(),
-                source: "External Data Agent",
-                url: DATA_AGENT_URL,
-                data: data
-            }, null, 2);
-        } else {
-            console.warn(`External Agent returned ${response.status} for ${area}`);
-        }
-    } catch (e) {
-        console.warn(`External Data Agent fetch failed for ${area}, falling back to SODA.`, e);
-    }
-    return null;
-}
 
 async function fetchSoda(datasetId: string, queryParams: string) {
     try {
@@ -79,21 +46,11 @@ export const fetchPSData = async (): Promise<string> => {
         return cached;
     }
 
-    // Try External Agent First
-    const externalData = await fetchFromExternalAgent("PS");
-    if (externalData) {
-        setCachedData(cacheKey, externalData);
-        return externalData;
-    }
-
-    // Fallback: SODA
-    // Police: last 7 days
-    // Dataset: wg3w-h783
-    // Note: 'incident_date' or 'incident_datetime' is standard. SODA queries are case-sensitive on columns sometimes.
+    // SODA - Direct API calls (no CORS issues)
+    // Police Incidents: wg3w-h783 | last 7 days
     const policeQuery = `$where=incident_date > '${getSimpleDate(7)}'&$limit=50&$order=incident_date DESC`;
 
-    // Fire: last 30 days
-    // Dataset: nuek-vuh3
+    // Fire Calls: nuek-vuh3 | last 30 days
     const fireQuery = `$where=call_date > '${getSimpleDate(30)}'&$limit=50&$order=call_date DESC`;
 
     const [police, fire] = await Promise.all([
@@ -130,34 +87,27 @@ export const fetchIUData = async (): Promise<string> => {
         return cached;
     }
 
-    // Try External Agent First
-    const externalData = await fetchFromExternalAgent("IU");
-    if (externalData) {
-        setCachedData(cacheKey, externalData);
-        return externalData;
-    }
+    // SODA - Direct API calls
+    // 311 Cases: dpis-dxar (SF 311 Cases - current dataset)
+    const cases311Query = `$where=requested_datetime > '${getSimpleDate(30)}'&$limit=50&$order=requested_datetime DESC`;
+    // Street Use Permits: w2ip-mc6t (active street use permits)
+    const streetUseQuery = `$limit=50&$order=permit_start_date DESC`;
 
-    // Fallback: SODA
-    // 311 Metrics: mwjb-biik
-    // Street Use Permits: n4vv-wgxq (real dataset)
-    const metricsQuery = `$limit=50&$order=date DESC`;
-    const streetPermitQuery = `$limit=50&$order=approved_date DESC`;
-
-    const [metrics311, streetPermits] = await Promise.all([
-        fetchSoda('mwjb-biik', metricsQuery),
-        fetchSoda('n4vv-wgxq', streetPermitQuery)
+    const [cases311, streetUse] = await Promise.all([
+        fetchSoda('dpis-dxar', cases311Query),
+        fetchSoda('w2ip-mc6t', streetUseQuery)
     ]);
 
     const result = {
         agent: "IU-4 (SODA)",
         timestamp: new Date().toISOString(),
         sources: [
-            { id: "mwjb-biik", name: "311 Metrics", status: metrics311 ? "OK" : "FAILED", count: metrics311?.length || 0 },
-            { id: "n4vv-wgxq", name: "Street Use Permits", status: streetPermits ? "OK" : "FAILED", count: streetPermits?.length || 0 }
+            { id: "dpis-dxar", name: "311 Cases", status: cases311 ? "OK" : "FAILED", count: cases311?.length || 0 },
+            { id: "w2ip-mc6t", name: "Street Use Permits", status: streetUse ? "OK" : "FAILED", count: streetUse?.length || 0 }
         ],
         data: {
-            metrics_311: metrics311 || [],
-            street_permits: streetPermits || []
+            cases_311: cases311 || [],
+            street_use_permits: streetUse || []
         }
     };
 
@@ -177,16 +127,8 @@ export const fetchLZData = async (): Promise<string> => {
         return cached;
     }
 
-    // Try External Agent First
-    const externalData = await fetchFromExternalAgent("LZ");
-    if (externalData) {
-        setCachedData(cacheKey, externalData);
-        return externalData;
-    }
-
-    // Fallback: SODA
+    // SODA - Direct API calls  
     // Building Permits: i98e-djp9 | last 90d
-    // 'filed_date' is standard for permits
     const permitQuery = `$where=filed_date > '${getSimpleDate(90)}'&$limit=50&$order=filed_date DESC`;
 
     const permits = await fetchSoda('i98e-djp9', permitQuery);
